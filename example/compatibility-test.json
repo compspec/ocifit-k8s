@@ -1,0 +1,68 @@
+{
+  "version": "v1alpha1",
+  "compatibilities": [
+    {
+      "tag": "debian:11",
+      "description": "Match kind worker (index 0) to a debian image",
+      "rules": [
+        {
+          "matchFeatures": [
+            {
+              "matchExpressions": [
+                {
+                  "op": "In",
+                  "key": "compspec.ocifit-k8s.node",
+                  "value": [
+                    "kind-worker"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "ubuntu:24.04",
+      "description": "Match kind worker (index 1) to an ubuntu image",
+      "rules": [
+        {
+          "matchFeatures": [
+            {
+              "matchExpressions": [
+                {
+                  "op": "In",
+                  "key": "compspec.ocifit-k8s.node",
+                  "value": [
+                    "kind-worker2"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "rockylinux:9",
+      "description": "Match kind worker (index 2) to a rockylinux image",
+      "rules": [
+        {
+          "matchFeatures": [
+            {
+              "matchExpressions": [
+                {
+                  "op": "In",
+                  "key": "compspec.ocifit-k8s.node",
+                  "value": [
+                    "kind-worker3"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
