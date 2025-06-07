@@ -9,7 +9,8 @@ set -oe pipefail
 NFD_NAMESPACE="node-feature-discovery"
 
 # This is just a prefix - we will add an arbitrary selector here
-FEATURE_LABEL="compspec.ocifit-k8s.node"
+FEATURE_LABEL=${1:-"compspec.ocifit-k8s.flavor=vanilla"}
+echo "Planning to add ${FEATURE_LABEL} to worker nodes..."
 
 echo "Finding worker nodes (nodes without the control-plane role)..."
 WORKER_NODES=$(kubectl get nodes -l '!node-role.kubernetes.io/control-plane' -o jsonpath='{.items[*].metadata.name}')
@@ -27,7 +28,7 @@ echo "---"
 for node_name in $WORKER_NODES; do
     echo "Processing node: ${node_name}"
     echo "  -> Applying labels..."
-    kubectl label node "${node_name}" "${FEATURE_LABEL}=${node_name}" --overwrite
+    kubectl label node "${node_name}" "${FEATURE_LABEL}" --overwrite
     echo "  -> Successfully applied labels to node '${node_name}'."
     echo "---"
 done

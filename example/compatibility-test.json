@@ -3,7 +3,7 @@
   "compatibilities": [
     {
       "tag": "debian:11",
-      "description": "Match kind worker (index 0) to a debian image",
+      "description": "Match flavor vanilla to a debian image",
       "rules": [
         {
           "matchFeatures": [
@@ -11,9 +11,9 @@
               "matchExpressions": [
                 {
                   "op": "In",
-                  "key": "compspec.ocifit-k8s.node",
+                  "key": "compspec.ocifit-k8s.flavor",
                   "value": [
-                    "kind-worker"
+                    "vanilla"
                   ]
                 }
               ]
@@ -24,7 +24,7 @@
     },
     {
       "tag": "ubuntu:24.04",
-      "description": "Match kind worker (index 1) to an ubuntu image",
+      "description": "Match flavor chocolate to an ubuntu image",
       "rules": [
         {
           "matchFeatures": [
@@ -32,9 +32,9 @@
               "matchExpressions": [
                 {
                   "op": "In",
-                  "key": "compspec.ocifit-k8s.node",
+                  "key": "compspec.ocifit-k8s.flavor",
                   "value": [
-                    "kind-worker2"
+                    "chocolate"
                   ]
                 }
               ]
@@ -45,7 +45,7 @@
     },
     {
       "tag": "rockylinux:9",
-      "description": "Match kind worker (index 2) to a rockylinux image",
+      "description": "Match flavor strawberry to a rockylinux image",
       "rules": [
         {
           "matchFeatures": [
@@ -53,9 +53,9 @@
               "matchExpressions": [
                 {
                   "op": "In",
-                  "key": "compspec.ocifit-k8s.node",
+                  "key": "compspec.ocifit-k8s.flavor",
                   "value": [
-                    "kind-worker3"
+                    "strawberry"
                   ]
                 }
               ]
