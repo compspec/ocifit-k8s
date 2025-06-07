@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-1
+  labels:
+    oci.image.compatibilities.selection/enabled: "true"
+  annotations:
+    oci.image.compatibilities.selection/image-ref: "ghcr.io/compspec/ocifit-k8s-compatibility:kind-example"
+spec:
+  # The container uri should be placeholder:latest. If you want to change, add the annotation:
+  # oci.image.compatibilities.selection/target-image: "myplaceholder"
+
+  containers:
+  - name: app
+    image: placeholder:latest
+    command: ["sleep", "3600"]
