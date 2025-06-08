@@ -52,7 +52,11 @@ type JSONPatch struct {
 
 // admit allows the request without modification
 func admit(ar *admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
-	log.Printf("Allowing pod %s/%s without mutation", ar.Request.Namespace, ar.Request.Name)
+	if ar.Request.Name != "" {
+		log.Printf("Allowing pod %s/%s: %s", ar.Request.Namespace, ar.Request.Name)
+	} else {
+		log.Printf("Allowing pod in namespace %s without mutation", ar.Request.Namespace)
+	}
 	return &admissionv1.AdmissionResponse{
 		Allowed: true,
 		UID:     ar.Request.UID,
@@ -61,7 +65,13 @@ func admit(ar *admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 
 // deny rejects the request with a message
 func deny(ar *admissionv1.AdmissionReview, message string) *admissionv1.AdmissionResponse {
-	log.Printf("Denying pod %s/%s: %s", ar.Request.Namespace, ar.Request.Name, message)
+
+	// Most pods don't have a name yet
+	if ar.Request.Name != "" {
+		log.Printf("Denying pod %s/%s: %s", ar.Request.Namespace, ar.Request.Name, message)
+	} else {
+		log.Printf("Denying pod in namespace %s: %s", ar.Request.Namespace, message)
+	}
 	return &admissionv1.AdmissionResponse{
 		Allowed: false,
 		UID:     ar.Request.UID,

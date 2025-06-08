@@ -1,7 +1,6 @@
 package validator
 
 import (
-	"fmt"
 	"log"
 	"regexp"
 	"strconv"
@@ -11,7 +10,6 @@ import (
 
 func evaluateRule(expression types.MatchExpression, nodeLabels map[string]string) bool {
 	// Get the value of the label from the node
-	fmt.Printf("Checking expression %s against node labels %s", expression, nodeLabels)
 	nodeVal, ok := nodeLabels[expression.Key]
 
 	switch expression.Op {
@@ -66,7 +64,7 @@ func evaluateRule(expression types.MatchExpression, nodeLabels map[string]string
 			if err != nil {
 				// A malformed regex in the spec is a spec error, not a node error.
 				// Log it and treat it as a non-match for this pattern.
-				log.Printf("WARN: Invalid regexp in compatibility spec: '%s'. Error: %v", pattern, err)
+				log.Printf("WARN: Invalid regexp in compatibility spec: '%s'. Error: %v\n", pattern, err)
 				continue
 			}
 			// Found a regex match.
@@ -77,7 +75,7 @@ func evaluateRule(expression types.MatchExpression, nodeLabels map[string]string
 		// No patterns matched.
 		return false
 
-	case types.MatchOpGt, types.MatchOpLt:
+	case types.MatchOpGt, types.MatchOpLt, types.MatchOpGte, types.MatchOpLte:
 		// Rule matches if the key exists AND its integer value is > or < the spec's value.
 		if !ok {
 
@@ -93,22 +91,28 @@ func evaluateRule(expression types.MatchExpression, nodeLabels map[string]string
 		// Convert node value to an integer.
 		nodeInt, err := strconv.Atoi(nodeVal)
 		if err != nil {
-			log.Printf("WARN: Could not convert node label value '%s' to int for Gt/Lt comparison. Key: %s", nodeVal, expression.Key)
+			log.Printf("WARN: Could not convert node label value '%s' to int for Gt/Lt/Gte/Lte comparison. Key: %s", nodeVal, expression.Key)
 			return false
 		}
 
 		// Convert spec value to an integer.
 		specInt, err := strconv.Atoi(specValStr)
 		if err != nil {
-			log.Printf("WARN: Could not convert spec value '%s' to int for Gt/Lt comparison. Key: %s", specValStr, expression.Key)
+			log.Printf("WARN: Could not convert spec value '%s' to int for Gt/Lt/Gte/Lte comparison. Key: %s", specValStr, expression.Key)
 			return false
 		}
 
 		// Perform the correct comparison.
+		if expression.Op == types.MatchOpGte {
+			return nodeInt >= specInt
+		}
 		if expression.Op == types.MatchOpGt {
 			return nodeInt > specInt
 		}
-		// If not Gt, it must be Lt.
+		if expression.Op == types.MatchOpLte {
+			return nodeInt <= specInt
+		}
+		// Last comparison, Lte
 		return nodeInt < specInt
 
 	default:
