@@ -25,8 +25,10 @@ const (
 	MatchOpInRegexp     MatchOp = "InRegexp"
 	MatchOpExists       MatchOp = "Exists"
 	MatchOpDoesNotExist MatchOp = "DoesNotExist"
-	MatchOpGt           MatchOp = "Gt" // Greater than
-	MatchOpLt           MatchOp = "Lt" // Less than
+	MatchOpGt           MatchOp = "Gt"  // Greater than
+	MatchOpLt           MatchOp = "Lt"  // Less than
+	MatchOpGte          MatchOp = "Gte" // Greater than or equal to
+	MatchOpLte          MatchOp = "Lte" // Less than or equal to
 )
 
 // MatchExpression specifies a requirement for matching features.
