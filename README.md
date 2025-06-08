@@ -2,8 +2,9 @@
 # OCIFit
 
 <p align="center">
-  <img src="docs/ocifit-k8s.png" style="max-width:70%" alt="OCIFit Kubernetes">
+  <img src="docs/ocifit-k8s.png" height="300" alt="OCIFit Kubernetes">
 </p>
+
 
 This is a Kubernetes controller that will do the following:
 
