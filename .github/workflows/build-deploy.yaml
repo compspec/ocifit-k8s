@@ -1,0 +1,47 @@
+name: build ocifit-k8s
+
+on:
+
+  # Publish packages on release
+  release:
+    types: [published]
+  pull_request: []
+
+  # On push to main we build and deploy images
+  push:
+    branches:
+    - main
+
+jobs:
+  build:
+    permissions:
+      packages: write
+
+    runs-on: ubuntu-latest
+    name: Build
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Build Container
+      if: (github.event_name != 'release')
+      run: make
+
+    - name: GHCR Login
+      if: (github.event_name != 'pull_request')
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build Container
+      if: (github.event_name == 'release')
+      run: | 
+        tag=${GITHUB_REF#refs/tags/}
+        make IMAGE_TAG=$tag
+        make push IMAGE_TAG=$tag
+
+    - name: Deploy
+      if: (github.event_name == 'push')
+      run: make push 

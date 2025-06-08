@@ -9,17 +9,15 @@ import (
 
 // evaluateCompatibilitySpec finds the best matching compatibility set from the spec
 // by evaluating its rules against the node's labels.
-// evaluateCompatibilitySpec finds the best matching compatibility set from the spec
-// by evaluating its rules against the node's labels.
 func EvaluateCompatibilitySpec(spec *types.CompatibilitySpec, nodeLabels map[string]string) (string, error) {
 	var bestMatch *types.Compatibility
 	maxWeight := -1
 
-	// Loop through each top-level 'Compatibility' set in the spec.
+	// Loop through each top-level Compatibility set in the spec.
 	for i, comp := range spec.Compatibilities {
 		allRulesMatch := true
 
-		// Each 'Compatibility' set can have multiple 'GroupRule's.
+		// Each Compatibility set can have multiple GroupRules
 		// All GroupRules must match for the set to be considered a match (AND logic).
 		for _, groupRule := range comp.Rules {
 			if !allRulesMatch {
@@ -34,7 +32,7 @@ func EvaluateCompatibilitySpec(spec *types.CompatibilitySpec, nodeLabels map[str
 				// All MatchExpressions must match (AND logic).
 				for _, expression := range featureMatcher.MatchExpressions {
 					if !evaluateRule(expression, nodeLabels) {
-						// As soon as one expression fails, the entire 'Compatibility' set is invalid.
+						// As soon as one expression fails, the entire Compatibility set is invalid.
 						allRulesMatch = false
 						break
 					}
@@ -42,7 +40,7 @@ func EvaluateCompatibilitySpec(spec *types.CompatibilitySpec, nodeLabels map[str
 			}
 		}
 
-		// If, after checking all the rules for this 'Compatibility' set, allRulesMatch is still true...
+		// If after checking all the rules for this set, allRulesMatch is still true...
 		if allRulesMatch {
 			log.Printf("Found a matching compatibility set: '%s' (weight %d)", comp.Tag, comp.Weight)
 
@@ -50,6 +48,7 @@ func EvaluateCompatibilitySpec(spec *types.CompatibilitySpec, nodeLabels map[str
 			if comp.Weight > maxWeight {
 				maxWeight = comp.Weight
 				// Capture the pointer to the current item in the slice.
+				// Note I haven't thought of how I'd want to use weight yet
 				bestMatch = &spec.Compatibilities[i]
 			}
 		}

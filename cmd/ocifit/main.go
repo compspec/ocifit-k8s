@@ -1,4 +1,3 @@
-// main.go
 package main
 
 import (
@@ -19,7 +18,6 @@ import (
 
 	"ghcr.io/compspec/ocifit-k8s/pkg/artifact"
 	"ghcr.io/compspec/ocifit-k8s/pkg/validator"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,8 +29,6 @@ import (
 	v1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
-	"oras.land/oras-go/v2/content"
-	"oras.land/oras-go/v2/registry/remote"
 )
 
 const (
@@ -108,7 +104,6 @@ func (ws *WebhookServer) recalculateHomogeneity() {
 	// We can't include control plane nodes - they don't have NFD labels
 	workerNodeSelector, err := labels.Parse("!node-role.kubernetes.io/control-plane")
 	if err != nil {
-		// This is a static string, so this failure is fatal for the controller's logic.
 		log.Fatalf("FATAL: Failed to parse worker node selector: %v", err)
 	}
 
@@ -148,80 +143,15 @@ func (ws *WebhookServer) recalculateHomogeneity() {
 	ws.commonLabels = referenceLabels
 }
 
-// --- WebhookServer with Node Cache ---
+// WebhookServer with Node Cache
 type WebhookServer struct {
 	nodeLister v1listers.NodeLister
 	server     *http.Server
 
-	// Cached state and a lock to protect it ---
+	// Cached state and a lock to protect it
 	stateLock    sync.RWMutex
 	isHomogenous bool
 	commonLabels map[string]string
-}
-
-// findCompatibleImage uses ORAS to find an image that matches the requirements
-func findCompatibleImage(ctx context.Context, imageRef string, requirements map[string]string) (string, error) {
-	registryName, repoAndTag, found := strings.Cut(imageRef, "/")
-	if !found {
-		return "", fmt.Errorf("invalid image reference format: %s", imageRef)
-	}
-	repoName, tag, found := strings.Cut(repoAndTag, ":")
-	if !found {
-		tag = "latest" // Default tag
-	}
-
-	// 1. Connect to the remote registry
-	reg, err := remote.NewRegistry(registryName)
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to registry %s: %w", registryName, err)
-	}
-	repo, err := reg.Repository(ctx, repoName)
-	if err != nil {
-		return "", fmt.Errorf("failed to access repository %s: %w", repoName, err)
-	}
-
-	// 2. Resolve the image index descriptor by its tag
-	indexDesc, err := repo.Resolve(ctx, tag)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve image index %s:%s: %w", repoName, tag, err)
-	}
-
-	// 3. Fetch and unmarshal the image index
-	indexBytes, err := content.FetchAll(ctx, repo, indexDesc)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch image index content: %w", err)
-	}
-	var index ocispec.Index
-	if err := json.Unmarshal(indexBytes, &index); err != nil {
-		return "", fmt.Errorf("failed to unmarshal image index: %w", err)
-	}
-
-	log.Printf("Checking %d manifests in index for %s", len(index.Manifests), imageRef)
-
-	// 4. Iterate through manifests in the index to find a compatible one
-	for _, manifestDesc := range index.Manifests {
-		if manifestDesc.Annotations == nil {
-			continue
-		}
-
-		match := true
-		// Check if all pod requirements are met by the manifest's annotations
-		for reqKey, reqVal := range requirements {
-			if manifestVal, ok := manifestDesc.Annotations[reqKey]; !ok || manifestVal != reqVal {
-				match = false
-				break
-			}
-		}
-
-		if match {
-			// Found a compatible image!
-			finalImage := fmt.Sprintf("%s/%s@%s", registryName, repoName, manifestDesc.Digest)
-			log.Printf("Found compatible image: %s", finalImage)
-			return finalImage, nil
-		}
-	}
-
-	return "", fmt.Errorf("no compatible image found for requirements: %v", requirements)
 }
 
 // findMatchingNode searches the cache for a node that satisfies the pod's nodeSelector.
@@ -246,8 +176,8 @@ func (ws *WebhookServer) findMatchingNode(nodeSelector map[string]string) (*core
 }
 
 // mutate is the core logic to look for compatibility labels and select a new image
-// mutate is the core logic of our webhook. It uses a cached state for efficiency.
 func (ws *WebhookServer) mutate(ar *admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
+
 	// Decode the Pod from the AdmissionReview
 	pod := &corev1.Pod{}
 	if err := json.Unmarshal(ar.Request.Object.Raw, pod); err != nil {
@@ -273,7 +203,7 @@ func (ws *WebhookServer) mutate(ar *admissionv1.AdmissionReview) *admissionv1.Ad
 		targetRef = targetRefDefault
 	}
 
-	// 2. Determine the target node's labels. We either have a homogenous cluster
+	// Determine the target node's labels. We either have a homogenous cluster
 	// (all nodes are the same) or we have to use a node selector for the image.
 	var nodeLabels map[string]string
 	if len(pod.Spec.NodeSelector) > 0 {
@@ -292,24 +222,24 @@ func (ws *WebhookServer) mutate(ar *admissionv1.AdmissionReview) *admissionv1.Ad
 		nodeLabels = commonLabels
 	}
 
-	// 3. Download and parse the compatibility spec from the OCI registry.
+	// Download and parse the compatibility spec from the OCI registry.
 	ctx := context.Background()
 
 	// Download the artifact (compatibility spec) from the uri
-	// TODO we should have mode to cache these and not need to re-download
+	// TODO (vsoch) we should have mode to cache these and not need to re-download
 	spec, err := artifact.DownloadCompatibilityArtifact(ctx, imageRef)
 	if err != nil {
 		return deny(ar, fmt.Sprintf("compatibility spec %s issue: %v", imageRef, err))
 	}
 
-	// 4. Evaluate the spec against the node's labels to find the winning tag.
+	// Evaluate the spec against the node's labels to find the winning tag.
 	// The "tag" attribute we are hijacking here to put the full container URI
 	finalImage, err := validator.EvaluateCompatibilitySpec(spec, nodeLabels)
 	if err != nil {
 		return deny(ar, fmt.Sprintf("failed to find compatible image: %v", err))
 	}
 
-	// 6. Create and apply the JSON patch (this logic is unchanged).
+	// Create and apply the JSON patch
 	var patches []JSONPatch
 	containerFound := false
 	for i, c := range pod.Spec.Containers {
@@ -375,7 +305,7 @@ func (ws *WebhookServer) handleMutate(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 
-	// --- Kubernetes Client and Informer Setup ---
+	// Kubernetes Client and Informer Setup
 	// We want to have a view of cluster nodes via NFD
 	config, err := clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
 	if err != nil {
@@ -405,7 +335,7 @@ func main() {
 			ws.recalculateHomogeneity()
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
-			// Optimization: only recalculate if compatibility labels have changed.
+			// Only recalculate if compatibility labels have changed.
 			oldNode := oldObj.(*corev1.Node)
 			newNode := newObj.(*corev1.Node)
 			if !reflect.DeepEqual(getCompatibilityLabels(oldNode), getCompatibilityLabels(newNode)) {
@@ -414,13 +344,13 @@ func main() {
 		},
 	})
 
-	// Start informer and wait for cache sync (same as before)
+	// Start informer and wait for cache sync
 	go factory.Start(stopCh)
 	if !cache.WaitForCacheSync(stopCh, nodeInformer.HasSynced) {
 		log.Fatal("failed to wait for caches to sync")
 	}
 
-	// --- NEW: Perform the initial calculation after cache sync ---
+	// Perform the initial calculation after cache sync
 	log.Println("Performing initial cluster homogeneity check...")
 	ws.recalculateHomogeneity()
 
@@ -446,7 +376,7 @@ func main() {
 		}
 	}()
 
-	// Graceful shutdown
+	// Graceful (or not so graceful) shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
