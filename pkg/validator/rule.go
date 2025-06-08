@@ -10,7 +10,7 @@ import (
 )
 
 func evaluateRule(expression types.MatchExpression, nodeLabels map[string]string) bool {
-	// Get the value of the label from the node. The 'ok' boolean is crucial.
+	// Get the value of the label from the node
 	fmt.Printf("Checking expression %s against node labels %s", expression, nodeLabels)
 	nodeVal, ok := nodeLabels[expression.Key]
 
@@ -33,25 +33,33 @@ func evaluateRule(expression types.MatchExpression, nodeLabels map[string]string
 				return true // Found a match.
 			}
 		}
-		return false // Did not find a match in the list.
+		// If we get here, we did not find a match in the list.
+		return false
 
 	case types.MatchOpNotIn:
 		// Rule matches if the key does not exist, OR if it exists but its value
-		// is NOT in the spec's value list.
+		// is not in the spec's value list.
 		if !ok {
-			return true // Key doesn't exist, so it can't be "In" the forbidden set.
+
+			// Key doesn't exist, so it can't be "In" the forbidden set.
+			return true
 		}
 		for _, v := range expression.Value {
+
+			// Found a forbidden match.
 			if nodeVal == v {
-				return false // Found a forbidden match.
+				return false
 			}
 		}
-		return true // Did not find any forbidden values.
+		// Did not find any forbidden values.
+		return true
 
 	case types.MatchOpInRegexp:
 		// Rule matches if the key exists AND its value matches any of the provided regex patterns.
 		if !ok {
-			return false // Key must exist to match a regex.
+
+			// Key must exist to match a regex.
+			return false
 		}
 		for _, pattern := range expression.Value {
 			re, err := regexp.Compile(pattern)
@@ -61,16 +69,20 @@ func evaluateRule(expression types.MatchExpression, nodeLabels map[string]string
 				log.Printf("WARN: Invalid regexp in compatibility spec: '%s'. Error: %v", pattern, err)
 				continue
 			}
+			// Found a regex match.
 			if re.MatchString(nodeVal) {
-				return true // Found a regex match.
+				return true
 			}
 		}
-		return false // No patterns matched.
+		// No patterns matched.
+		return false
 
 	case types.MatchOpGt, types.MatchOpLt:
 		// Rule matches if the key exists AND its integer value is > or < the spec's value.
 		if !ok {
-			return false // Key must exist for comparison.
+
+			// Key must exist for comparison.
+			return false
 		}
 		if len(expression.Value) == 0 {
 			log.Printf("WARN: Gt/Lt operator used with no value in spec for key '%s'", expression.Key)

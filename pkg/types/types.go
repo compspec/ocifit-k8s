@@ -1,13 +1,12 @@
 package types
 
-// --- Image Compatibility Spec Structs (from NFD)
+// Image Compatibility Spec Structs (from NFD)
 // https://github.com/kubernetes-sigs/node-feature-discovery/blob/master/api/image-compatibility/v1alpha1/spec.go
 
 const CompatibilitySpecMediaType = "application/vnd.oci.image.compatibilities.v1+json"
 
 // GroupRule is a list of node feature rules.
 type GroupRule struct {
-	// CORRECTED: This is a slice to match the JSON array `[ ... ]`
 	MatchFeatures []FeatureMatcher `json:"matchFeatures"`
 }
 
@@ -36,8 +35,6 @@ type MatchExpression struct {
 	Key   string   `json:"key"`
 	Value []string `json:"value,omitempty"`
 }
-
-// --- Image Compatibility Spec Structs ---
 
 // CompatibilitySpec represents image compatibility metadata.
 type CompatibilitySpec struct {

@@ -17,7 +17,7 @@ import (
 func DownloadCompatibilityArtifact(ctx context.Context, specRef string) (*types.CompatibilitySpec, error) {
 	log.Printf("Downloading compatibility spec from: %s", specRef)
 
-	// --- Step 1: Connect to the registry and resolve the manifest by its tag ---
+	// 1. Connect to the registry and resolve the manifest by its tag
 	reg, err := remote.NewRegistry(strings.Split(specRef, "/")[0])
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to registry for spec: %w", err)
@@ -31,7 +31,7 @@ func DownloadCompatibilityArtifact(ctx context.Context, specRef string) (*types.
 		return nil, fmt.Errorf("failed to resolve spec manifest %s: %w", specRef, err)
 	}
 
-	// --- Step 2: Fetch and parse the OCI Manifest itself ---
+	// 2. Fetch and parse the OCI Manifest itself
 	log.Println("Fetching OCI manifest content...")
 	manifestBytes, err := content.FetchAll(ctx, repo, manifestDesc)
 	if err != nil {
@@ -43,7 +43,7 @@ func DownloadCompatibilityArtifact(ctx context.Context, specRef string) (*types.
 	}
 	log.Printf("Successfully parsed OCI manifest (artifact type: %s)", manifest.ArtifactType)
 
-	// --- Step 3: Find the correct layer within the manifest ---
+	// 3. Find the correct layer within the manifest
 	log.Printf("Searching for spec layer with media type: %s", types.CompatibilitySpecMediaType)
 	var specLayerDesc *ocispec.Descriptor
 	for _, layer := range manifest.Layers {
@@ -59,14 +59,14 @@ func DownloadCompatibilityArtifact(ctx context.Context, specRef string) (*types.
 	}
 	log.Printf("Found spec layer with digest: %s", specLayerDesc.Digest)
 
-	// --- Step 4: Fetch the content of the spec layer using its descriptor ---
+	// 4. Fetch the content of the spec layer using its descriptor
 	log.Println("Fetching compatibility spec content...")
 	specBytes, err := content.FetchAll(ctx, repo, *specLayerDesc)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch spec layer content: %w", err)
 	}
 
-	// --- Step 5: Unmarshal the final spec JSON into our struct ---
+	// 5. Unmarshal the final spec JSON into our struct
 	var spec types.CompatibilitySpec
 	err = json.Unmarshal(specBytes, &spec)
 	if err != nil {
@@ -75,5 +75,4 @@ func DownloadCompatibilityArtifact(ctx context.Context, specRef string) (*types.
 
 	log.Printf("Successfully downloaded and parsed spec version %s", spec.Version)
 	return &spec, nil
-
 }
