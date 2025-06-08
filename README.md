@@ -16,7 +16,8 @@ This is a Kubernetes controller that will do the following:
 ## Notes
 
 For the above, you don't technically need NFD if you add and select your own labels, but I want to use NFD to better integrate with the larger 
-community. The controller webhook will work with or without it, assuming the labels you have on nodes that you are selecting for exist.
+community. I've also scoped the matching labels to be for `feature.node` instead of `feature.node.kubernetes.io` so any generatd compatibility specs can be used for cases outside of Kubernetes (without the user thinking it is weird).
+The controller webhook will work with or without it, assuming the labels you have on nodes that you are selecting for exist.
 Next, we place this controller on the level of a webhook, meaning that it isn't influencing scheduling, but is anticipating what container
 should be selected for a node based on either:
 
@@ -96,18 +97,18 @@ In our real world use case we would select based on operating system and kernel 
 we are just going to add the same label to all nodes and then check our controller based on the image selected. Let's first add "vanilla":
 
 ```bash
-bash ./example/add-nfd-features.sh "compspec.ocifit-k8s.flavor=vanilla"
+bash ./example/add-nfd-features.sh "feature.node.ocifit-k8s.flavor=vanilla"
 ```
 
 View our added labels:
 
 ```bash
-$ kubectl get nodes -o json | jq .items[].metadata.labels | grep compspec.ocifit-k8s.flavor
+kubectl get nodes -o json | jq .items[].metadata.labels | grep feature.node.ocifit-k8s.flavor
 ```
 ```console
-  "compspec.ocifit-k8s.flavor": "vanilla",
-  "compspec.ocifit-k8s.flavor": "vanilla",
-  "compspec.ocifit-k8s.flavor": "vanilla",
+  "feature.node.ocifit-k8s.flavor": "vanilla",
+  "feature.node.ocifit-k8s.flavor": "vanilla",
+  "feature.node.ocifit-k8s.flavor": "vanilla",
 ```
 
 If you want to see actual NFD labels:
@@ -140,9 +141,9 @@ kubectl logs ocifit-k8s-deployment-68d5bf5865-494mg -f
 
 At this point, we want to test compatibility. This step is already done, but I'll show you how I designed the compatibility spec. The logic for this dummy case is the following:
 
-1. If our custom label "compspec.ocifit-k8s.flavor" is vanilla, we want to choose a debian container.
-1. If our custom label "compspec.ocifit-k8s.flavor" is chocolate, we want to choose a ubuntu container.
-1. If our custom label "compspec.ocifit-k8s.flavor" is strawberry, we want to choose a rockylinux container.
+1. If our custom label "feature.node.ocifit-k8s.flavor" is vanilla, we want to choose a debian container.
+1. If our custom label "feature.node.ocifit-k8s.flavor" is chocolate, we want to choose a ubuntu container.
+1. If our custom label "feature.node.ocifit-k8s.flavor" is strawberry, we want to choose a rockylinux container.
 
 Normally, we would attach a compatibility spec to an image, like [this](https://github.com/kubernetes-sigs/node-feature-discovery/blob/master/docs/usage/image-compatibility.md#attach-the-artifact-to-the-image). But
 here we are flipping the logic a bit. We don't know the image, and instead we are directing the client to look directly at one artifact. Thus, the first step was to package the compatibility artifact and push to a registry (and make it public). I did that as follows (you don't need to do this):
@@ -151,9 +152,82 @@ here we are flipping the logic a bit. We don't know the image, and instead we ar
 oras push ghcr.io/compspec/ocifit-k8s-compatibility:kind-example ./example/compatibility-test.json:application/vnd.oci.image.compatibilities.v1+json
 ```
 
-We aren't going to be using any referrers API or linking this to an image. The target images are in the artifact.
+We aren't going to be using any referrers API or linking this to an image. The target images are in the artifact, and we get there directly from the associated manifest.
+Try creating the pod
 
-**being written**
+```bash
+kubectl apply -f ./example/pod.yaml
+```
+
+Now look the log, the selection was vanilla, so we matched to the debian image. 
+
+```console
+PRETTY_NAME="Debian GNU/Linux 11 (bullseye)"
+NAME="Debian GNU/Linux"
+VERSION_ID="11"
+VERSION="11 (bullseye)"
+VERSION_CODENAME=bullseye
+ID=debian
+HOME_URL="https://www.debian.org/"
+SUPPORT_URL="https://www.debian.org/support"
+BUG_REPORT_URL="https://bugs.debian.org/"
+```
+
+Because we matched the feature.node label and it was the best fit container. Now delete that label and install
+another:
+
+```bash
+kubectl delete -f example/pod.yaml 
+bash ./example/remove-nfd-features.sh
+bash ./example/add-nfd-features.sh "feature.node.ocifit-k8s.flavor=chocolate"
+```
+
+Now we match to ubuntu 22.04
+
+```console
+PRETTY_NAME="Ubuntu 24.04.2 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+VERSION="24.04.2 LTS (Noble Numbat)"
+VERSION_CODENAME=noble
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=noble
+LOGO=ubuntu-logo
+```
+
+And finally, strawberry.
+
+```bash
+kubectl delete -f example/pod.yaml 
+bash ./example/remove-nfd-features.sh 
+bash ./example/add-nfd-features.sh "feature.node.ocifit-k8s.flavor=strawberry"
+```
+```console
+NAME="Rocky Linux"
+VERSION="9.3 (Blue Onyx)"
+ID="rocky"
+ID_LIKE="rhel centos fedora"
+VERSION_ID="9.3"
+PLATFORM_ID="platform:el9"
+PRETTY_NAME="Rocky Linux 9.3 (Blue Onyx)"
+ANSI_COLOR="0;32"
+LOGO="fedora-logo-icon"
+CPE_NAME="cpe:/o:rocky:rocky:9::baseos"
+HOME_URL="https://rockylinux.org/"
+BUG_REPORT_URL="https://bugs.rockylinux.org/"
+SUPPORT_END="2032-05-31"
+ROCKY_SUPPORT_PRODUCT="Rocky-Linux-9"
+ROCKY_SUPPORT_PRODUCT_VERSION="9.3"
+REDHAT_SUPPORT_PRODUCT="Rocky Linux"
+REDHAT_SUPPORT_PRODUCT_VERSION="9.3"
+```
+
+Boum! Conceptually, we are selecting a different image depending on the rules in the compatibility spec. Our node features were dummy, but they could be real attributes related to kernel, networking, etc.
 
 ## License
 

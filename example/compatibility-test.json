@@ -11,7 +11,7 @@
               "matchExpressions": [
                 {
                   "op": "In",
-                  "key": "compspec.ocifit-k8s.flavor",
+                  "key": "feature.node.ocifit-k8s.flavor",
                   "value": [
                     "vanilla"
                   ]
@@ -32,7 +32,7 @@
               "matchExpressions": [
                 {
                   "op": "In",
-                  "key": "compspec.ocifit-k8s.flavor",
+                  "key": "feature.node.ocifit-k8s.flavor",
                   "value": [
                     "chocolate"
                   ]
@@ -53,7 +53,7 @@
               "matchExpressions": [
                 {
                   "op": "In",
-                  "key": "compspec.ocifit-k8s.flavor",
+                  "key": "feature.node.ocifit-k8s.flavor",
                   "value": [
                     "strawberry"
                   ]

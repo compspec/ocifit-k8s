@@ -9,7 +9,7 @@ set -oe pipefail
 NFD_NAMESPACE="node-feature-discovery"
 
 # This is just a prefix - we will add an arbitrary selector here
-FEATURE_LABEL=${1:-"compspec.ocifit-k8s.flavor=vanilla"}
+FEATURE_LABEL=${1:-"feature.node.ocifit-k8s.flavor=vanilla"}
 echo "Planning to add ${FEATURE_LABEL} to worker nodes..."
 
 echo "Finding worker nodes (nodes without the control-plane role)..."
