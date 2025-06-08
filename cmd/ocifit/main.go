@@ -76,9 +76,11 @@ func deny(ar *admissionv1.AdmissionReview, message string) *admissionv1.Admissio
 }
 
 // Determine if label is for NFD
-// We use this to assess uniqueness
+// We use this to assess uniqueness (homogeneity of cluster)
 func isCompatibilityLabel(key string) bool {
-	return strings.HasPrefix(key, "feature.node.kubernetes.io/") ||
+	// Note that the full URI is feature.node.kubernetes.io/
+	// I'm truncating to feature.node so the features aren't Kubernetes specific
+	return strings.HasPrefix(key, "feature.node") ||
 		key == "kubernetes.io/arch" ||
 		key == "kubernetes.io/os"
 }
@@ -300,9 +302,6 @@ func (ws *WebhookServer) mutate(ar *admissionv1.AdmissionReview) *admissionv1.Ad
 		return deny(ar, fmt.Sprintf("compatibility spec %s issue: %v", imageRef, err))
 	}
 
-	// Debug printing for me :)
-	fmt.Println(spec)
-
 	// 4. Evaluate the spec against the node's labels to find the winning tag.
 	// The "tag" attribute we are hijacking here to put the full container URI
 	finalImage, err := validator.EvaluateCompatibilitySpec(spec, nodeLabels)
@@ -314,7 +313,7 @@ func (ws *WebhookServer) mutate(ar *admissionv1.AdmissionReview) *admissionv1.Ad
 	var patches []JSONPatch
 	containerFound := false
 	for i, c := range pod.Spec.Containers {
-		if c.Name == targetRef {
+		if c.Image == targetRef {
 			patches = append(patches, JSONPatch{
 				Op:    "replace",
 				Path:  fmt.Sprintf("/spec/containers/%d/image", i),

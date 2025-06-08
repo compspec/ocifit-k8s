@@ -1,6 +1,7 @@
 package validator
 
 import (
+	"fmt"
 	"log"
 	"regexp"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 
 func evaluateRule(expression types.MatchExpression, nodeLabels map[string]string) bool {
 	// Get the value of the label from the node. The 'ok' boolean is crucial.
+	fmt.Printf("Checking expression %s against node labels %s", expression, nodeLabels)
 	nodeVal, ok := nodeLabels[expression.Key]
 
 	switch expression.Op {

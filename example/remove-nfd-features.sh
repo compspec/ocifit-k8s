@@ -2,7 +2,7 @@
 set -e
 
 # List the label keys to remove, each followed by a minus sign.
-LABELS_TO_REMOVE="compspec.ocifit-k8s.flavor-"
+LABELS_TO_REMOVE="feature.node.ocifit-k8s.flavor-"
 
 echo "Finding worker nodes..."
 WORKER_NODES=$(kubectl get nodes -l '!node-role.kubernetes.io/control-plane' -o jsonpath='{.items[*].metadata.name}')

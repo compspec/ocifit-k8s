@@ -24,12 +24,11 @@ func EvaluateCompatibilitySpec(spec *types.CompatibilitySpec, nodeLabels map[str
 		for _, groupRule := range comp.Rules {
 			if !allRulesMatch {
 				break
-			} // Short-circuit if a previous rule failed
-
+			}
 			for _, featureMatcher := range groupRule.MatchFeatures {
 				if !allRulesMatch {
 					break
-				} // Short-circuit
+				}
 
 				// Each FeatureMatcher has a slice of MatchExpressions. Loop through them.
 				// All MatchExpressions must match (AND logic).
@@ -37,7 +36,7 @@ func EvaluateCompatibilitySpec(spec *types.CompatibilitySpec, nodeLabels map[str
 					if !evaluateRule(expression, nodeLabels) {
 						// As soon as one expression fails, the entire 'Compatibility' set is invalid.
 						allRulesMatch = false
-						break // Exit the inner 'expression' loop.
+						break
 					}
 				}
 			}
