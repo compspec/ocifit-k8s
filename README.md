@@ -2,19 +2,20 @@
 # OCIFit
 
 <p align="center">
-  <img src="docs/ocifit-k8s.png" height="300" alt="OCIFit Kubernetes">
+  <img src="docs/ocifit-k8s.png" height="500" alt="OCIFit Kubernetes">
 </p>
+
 
 
 This is a Kubernetes controller that will do the following:
 
-1. Start running in a cluster with NFD, and retrieving metadata about nodes in the cluster, along with being updated when nodes are added and removed.
-2. Receiving pods and checking if they are flagged for image selection.
-  a. Being flagged means having the label "oci.image.compatibilities.selection/enabled" and (optionally) a node selector
-  b. If the cluster is not homogenous, a node selector is required, and should be the instance type that the pod is intended for.
-  c. If enabled, a URI is provided that points to a compatibility artifact
-  d. The artifact describes several images (and criteria for checking) that can be used for the Pod
-  e. The controller checks known nodes for the instance type against the spec, 
+* Start running in a cluster with NFD, and retrieving metadata about nodes in the cluster, along with being updated when nodes are added and removed.
+* Receiving pods and checking if they are flagged for image selection.  
+  * Being flagged means having the label "oci.image.compatibilities.selection/enabled" and (optionally) a node selector
+  * If the cluster is not homogenous, a node selector is required, and should be the instance type that the pod is intended for.
+  * If enabled, a URI is provided that points to a compatibility artifact
+  * The artifact describes several images (and criteria for checking) that can be used for the Pod
+  * The controller checks known nodes for the instance type against the spec, 
 
 
 ## Notes
