@@ -1,5 +1,5 @@
-IMAGE_NAME ?= ghcr.io/compspec/ocifit-k8s
-IMAGE_TAG ?= latest
+IMAGE_NAME ?= ghcr.io/converged-computing/aws-performance-study
+IMAGE_TAG ?= model-server
 FULL_IMAGE_NAME = $(IMAGE_NAME):$(IMAGE_TAG)
 DOCKERFILE_PATH = Dockerfile
 BUILD_CONTEXT = .
@@ -16,33 +16,10 @@ build:
 		$(BUILD_CONTEXT)
 	@echo "Docker image $(FULL_IMAGE_NAME) built successfully."
 
-# The mlserver
-mlserver:
-	make -C ./mlserver
-
-# Kind setup - we want to build both and push
-kind: mlserver build push
-	docker push ghcr.io/converged-computing/aws-performance-study:model-server
-
 # Push the docker image
 push:
 	@echo "Pushing image $(FULL_IMAGE_NAME)..."
 	docker push $(FULL_IMAGE_NAME)
-
-# Install the webhook
-install:
-	@echo "Installing $(FULL_IMAGE_NAME)..."
-	kubectl apply -f ./deploy/webhook.yaml
-
-# Install the webhook
-uninstall-mlserver:
-	@echo "Installing $(FULL_IMAGE_NAME)..."
-	kubectl apply -f ./deploy/webhook-with-mlserver.yaml
-
-# Install the webhook
-uninstall:
-	@echo "Uninstalling $(FULL_IMAGE_NAME)..."
-	kubectl delete -f ./deploy/webhook.yaml
 
 # Remove the image (clean with rmi)
 clean:
@@ -50,5 +27,5 @@ clean:
 	docker rmi $(FULL_IMAGE_NAME) || true
 	@echo "Docker image $(FULL_IMAGE_NAME) removed (if it existed)."
 
-.PHONY: all build clean mlserver
+.PHONY: all build clean
 

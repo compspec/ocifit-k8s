@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod
+  labels:
+    oci.image.compatibilities.selection/enabled: "true"
+  annotations:
+    # This contains ml-compatibility-artifact.yaml
+    oci.image.compatibilities.selection/model: "fom"
+    oci.image.compatibilities.selection/image-ref: "ghcr.io/compspec/ocifit-k8s-compatibility:ml-example"
+spec:
+  # This selection is for an instance type, but we choose a matching platform in placeholder:latest
+  # depending on the selection. So technically we are choosing image and instance type.
+  containers:
+  - name: app
+    image: placeholder:latest
+    command: ["/bin/sh", "-c"]
+    args:
+      - "cat /etc/os-release"
