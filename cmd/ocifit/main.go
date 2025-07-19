@@ -67,9 +67,12 @@ type PredictionRequest struct {
 // PredictionResponse is the expected response from the Python model server.
 type PredictionResponse struct {
 	SelectedInstance map[string]interface{} `json:"selected_instance"`
+	Instance	 string                 `json:"instance"`
+	Arch             string                 `json:"arch"`
 	Score            float64                `json:"score"`
 	InstanceIndex    int                    `json:"instance_index"`
 }
+
 
 // WebhookServer with Node Cache and a direct k8s client
 type WebhookServer struct {
@@ -282,30 +285,20 @@ func (ws *WebhookServer) selectImageWithModel(
 	}
 	log.Printf("Sending prediction request for model '%s' with %d nodes", requestPayload.MetricName, len(requestPayload.Features))
 	prediction, err := callPredictEndpoint(ctx, requestPayload)
+	fmt.Println(prediction)
 	if err != nil {
 		return "", "", fmt.Errorf("model prediction failed: %w", err)
 	}
 	log.Printf("Model server selected instance with features: %+v", prediction.SelectedInstance)
 
-	// NEW LOGIC: Extract the instance type directly from the winning instance's labels.
-	instanceType, ok := prediction.SelectedInstance[instanceTypeLabel].(string)
-	if !ok {
-		return "", "", fmt.Errorf("winning instance from model is missing instance type label '%s'", instanceTypeLabel)
-	}
-
-	instanceArch, ok := prediction.SelectedInstance[instanceArchLabel].(string)
-	if !ok {
-		return "", "", fmt.Errorf("winning instance from model is missing instance architecture '%s'", instanceArchLabel)
-	}
-
 	// Get the right platform
-	finalImage, ok := selectedRule.Platforms[instanceArch]
+	finalImage, ok := selectedRule.Platforms[prediction.Arch]
 	if !ok {
-		return "", "", fmt.Errorf("model does not provision architecture '%s'", instanceArch)
+		return "", "", fmt.Errorf("model does not provision architecture '%s'", prediction.Arch)
 	}
 
-	log.Printf("Model selected instance type: '%s'", instanceType)
-	return instanceType, finalImage, nil
+	log.Printf("Model selected instance type: '%s'", prediction.Instance)
+	return prediction.Instance, finalImage, nil
 }
 
 func callPredictEndpoint(ctx context.Context, payload PredictionRequest) (*PredictionResponse, error) {
@@ -351,18 +344,12 @@ func (ws *WebhookServer) getAllNodeFeatures(ctx context.Context) ([]map[string]i
 	return featureMatrix, nil
 }
 
-func isCompatibilityLabel(key string) bool {
-	return strings.HasPrefix(key, "feature.node") ||
-		key == "kubernetes.io/arch" ||
-		key == "kubernetes.io/os"
-}
-
+// getCompatibility labels returns all labels. We used to return just NFD but cannot
+// know in advance which label might be useful
 func getCompatibilityLabels(node *corev1.Node) map[string]string {
 	labels := make(map[string]string)
 	for key, val := range node.Labels {
-		if isCompatibilityLabel(key) {
-			labels[key] = val
-		}
+		labels[key] = val
 	}
 	return labels
 }

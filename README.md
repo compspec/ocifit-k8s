@@ -50,6 +50,7 @@ but needs further discussion and thinking.
 | oci.image.compatibilities.selection/target-image | annotation | placeholder:latest | yes | image URI to replace in pod |
 | oci.image.compatibilities.selection/image-ref| annotation | placeholder:latest | no | artifact reference "image" in OCI registry |
 | oci.image.compatibilities.selection/enabled | label | unset | yes | Flag to indicate we want to do compatibility image selection |
+| oci.image.compatibilities.selection/model | annotation | unset | no | If retrieving a model specification, choose this model. |
 
 Note that if you remove enabled, the webhook won't trigger, so it is required.
 

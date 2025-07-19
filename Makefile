@@ -21,13 +21,17 @@ mlserver:
 	make -C ./mlserver
 
 # Kind setup - we want to build both and push
-kind: mlserver build push
-	docker push ghcr.io/converged-computing/aws-performance-study:model-server
+kind: mlserver mlserver-push build push
+
 
 # Push the docker image
 push:
 	@echo "Pushing image $(FULL_IMAGE_NAME)..."
 	docker push $(FULL_IMAGE_NAME)
+
+mlserver-push:
+	@echo "Pushing image ghcr.io/converged-computing/aws-performance-study:model-server..."
+	docker push ghcr.io/converged-computing/aws-performance-study:model-server
 
 # Install the webhook
 install:
