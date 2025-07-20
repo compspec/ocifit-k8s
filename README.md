@@ -262,7 +262,7 @@ Boum! Conceptually, we are selecting a different image depending on the rules in
 
 #### ML Server Decision
 
-
+See [these experiments](https://github.com/converged-computing/aws-performance-study/tree/main/experiment/eks/cpu/models) for an example of using models.
 
 ## License
 

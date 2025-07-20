@@ -137,5 +137,9 @@ webhooks:
     apiGroups: [""]
     apiVersions: ["v1"]
     resources: ["pods"]
+  - operations: [ "CREATE" ]
+    apiGroups: ["flux-framework.org"]
+    apiVersions: ["v1alpha2"]
+    resources: ["miniclusters"]
   sideEffects: None
   admissionReviewVersions: ["v1"]

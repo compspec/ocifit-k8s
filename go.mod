@@ -5,6 +5,7 @@ go 1.24.0
 toolchain go1.24.4
 
 require (
+	github.com/flux-framework/flux-operator v0.0.0-20250720220112-117c17c5fde1
 	github.com/opencontainers/image-spec v1.1.1
 	k8s.io/api v0.33.1
 	k8s.io/apimachinery v0.33.1

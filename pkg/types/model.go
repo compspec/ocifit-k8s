@@ -5,6 +5,23 @@ import (
 	"fmt"
 )
 
+// PredictionRequest is the payload sent to the Python model server.
+type PredictionRequest struct {
+	MetricName     string                   `json:"metric_name"`
+	Directionality string                   `json:"directionality"`
+	Features       []map[string]interface{} `json:"features"`
+}
+
+// PredictionResponse is the expected response from the Python model server.
+type PredictionResponse struct {
+	SelectedInstance map[string]interface{} `json:"selected_instance"`
+	Instance         string                 `json:"instance"`
+	Arch             string                 `json:"arch"`
+	Score            float64                `json:"score"`
+	InstanceIndex    int                    `json:"instance_index"`
+	InstanceSelector string                 `json:"instance-selector"`
+}
+
 // ModelCompatibilitySpecMediaType is the reserved media type for this new specification.
 const ModelCompatibilitySpecMediaType = "application/vnd.oci.image.model-compatibilities.v1+json"
 

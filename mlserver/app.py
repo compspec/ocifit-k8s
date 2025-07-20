@@ -5,6 +5,8 @@ import pandas
 import numpy as np
 import warnings
 import random
+import logging
+
 from flask import Flask, request, jsonify
 
 MODELS_DIR = "/models"
@@ -14,6 +16,7 @@ CONTROL_PLANE_LABEL = "node-role.kubernetes.io/control-plane"
 HOSTNAME_LABEL = "kubernetes.io/hostname"
 
 app = Flask(__name__)
+app.logger.setLevel(logging.DEBUG)
 models = {}
 
 
@@ -138,18 +141,17 @@ def _predict_with_model(model_name, directionality, feature_matrix):
 
     # Construct and return the result
     selected_node_features = compute_nodes[best_index]
-
     result = {
         "selected_instance": selected_node_features,
-        "instance_index": best_index,
-        "instance": input_df.index[best_index],
+        "instance": str(input_df.index[best_index]),
         "instance-selector": (
             INSTANCE_TYPE_LABEL
             if INSTANCE_TYPE_LABEL in selected_node_features
             else HOSTNAME_LABEL
         ),
         "arch": selected_node_features.get(ARCH_LABEL, "unknown"),
-        "score": scores[best_index],
+        # Don't return for now - doesn't serialize right
+        "score": None,
     }
     return result, 200
 
@@ -172,12 +174,11 @@ def _choose_randomly(feature_matrix):
 
     result = {
         "selected_instance": selected_node_features,
-        "instance_index": chosen_index,
         "instance": identifiers[chosen_index],
         "instance-selector": (
-            HOSTNAME_LABEL
-            if HOSTNAME_LABEL in selected_node_features
-            else INSTANCE_TYPE_LABEL
+            INSTANCE_TYPE_LABEL
+            if INSTANCE_TYPE_LABEL in selected_node_features
+            else HOSTNAME_LABEL
         ),
         "arch": selected_node_features.get(ARCH_LABEL, "unknown"),
         "score": None,  # No score for random selection
@@ -227,6 +228,7 @@ def predict():
             404,
         )
 
+    app.logger.error(result)
     return jsonify(result), status_code
 
 

@@ -18,8 +18,11 @@ import (
 	"time"
 
 	"ghcr.io/compspec/ocifit-k8s/pkg/artifact"
+	"ghcr.io/compspec/ocifit-k8s/pkg/flux"
 	"ghcr.io/compspec/ocifit-k8s/pkg/types"
 	"ghcr.io/compspec/ocifit-k8s/pkg/validator"
+
+	miniclusterv1alpha2 "github.com/flux-framework/flux-operator/api/v1alpha2"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -49,30 +52,6 @@ const (
 var (
 	universalDeserializer = serializer.NewCodecFactory(runtime.NewScheme()).UniversalDeserializer()
 )
-
-// JSONPatch represents a single JSON patch operation
-type JSONPatch struct {
-	Op    string      `json:"op"`
-	Path  string      `json:"path"`
-	Value interface{} `json:"value,omitempty"`
-}
-
-// PredictionRequest is the payload sent to the Python model server.
-type PredictionRequest struct {
-	MetricName     string                   `json:"metric_name"`
-	Directionality string                   `json:"directionality"`
-	Features       []map[string]interface{} `json:"features"`
-}
-
-// PredictionResponse is the expected response from the Python model server.
-type PredictionResponse struct {
-	SelectedInstance map[string]interface{} `json:"selected_instance"`
-	Instance         string                 `json:"instance"`
-	Arch             string                 `json:"arch"`
-	Score            float64                `json:"score"`
-	InstanceIndex    int                    `json:"instance_index"`
-	InstanceSelector string                 `json:"instance-selector"`
-}
 
 // WebhookServer with Node Cache and a direct k8s client
 type WebhookServer struct {
@@ -113,13 +92,26 @@ func deny(ar *admissionv1.AdmissionReview, message string) *admissionv1.Admissio
 	}
 }
 
-// mutate is the core logic to look for compatibility labels and select a new image
+// mutate responds to the object kind, with different behavior depending on the type
 func (ws *WebhookServer) mutate(ar *admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
+	// Use the Kind from the AdmissionReview request to route to the correct handler
+	switch ar.Request.Kind.Kind {
+	case "Pod":
+		return ws.mutatePod(ar)
+	case "MiniCluster":
+		return ws.mutateMiniCluster(ar)
+	default:
+		log.Printf("Webhook received unhandled kind '%s', allowing.", ar.Request.Kind.Kind)
+		return admit(ar)
+	}
+}
+
+// mutate is the core logic to look for compatibility labels and select a new image
+func (ws *WebhookServer) mutatePod(ar *admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 	pod := &corev1.Pod{}
 	if err := json.Unmarshal(ar.Request.Object.Raw, pod); err != nil {
 		return deny(ar, fmt.Sprintf("could not decode pod object: %v", err))
 	}
-
 	if val, ok := pod.Labels[enabledLabel]; !ok || val != "true" {
 		return admit(ar)
 	}
@@ -129,10 +121,6 @@ func (ws *WebhookServer) mutate(ar *admissionv1.AdmissionReview) *admissionv1.Ad
 	if !ok {
 		return deny(ar, fmt.Sprintf("missing required annotation: %s", imageRefAnnotation))
 	}
-	targetRef, ok := pod.Annotations[targetImage]
-	if !ok {
-		targetRef = targetRefDefault
-	}
 
 	ctx := context.Background()
 	genericSpec, err := artifact.DownloadCompatibilityArtifact(ctx, imageRef)
@@ -141,13 +129,13 @@ func (ws *WebhookServer) mutate(ar *admissionv1.AdmissionReview) *admissionv1.Ad
 	}
 
 	var finalImage, finalInstance string
-	var prediction *PredictionResponse
-	var patches []JSONPatch
+	var prediction *types.PredictionResponse
+	var patches []types.JSONPatch
 
 	switch spec := genericSpec.(type) {
 	case *types.ModelCompatibilitySpec:
 		log.Println("Handling artifact as ModelCompatibilitySpec")
-		finalImage, prediction, err = ws.selectImageWithModel(ctx, pod, spec)
+		finalImage, prediction, err = ws.selectImageWithModel(ctx, pod.Annotations, spec)
 
 		// For the model spec, we make a request to the server here
 		if err != nil {
@@ -156,7 +144,7 @@ func (ws *WebhookServer) mutate(ar *admissionv1.AdmissionReview) *admissionv1.Ad
 
 		// If the pod's nodeSelector is nil, we need to create it with an "add" operation.
 		if pod.Spec.NodeSelector == nil {
-			patches = append(patches, JSONPatch{
+			patches = append(patches, types.JSONPatch{
 				Op:   "add",
 				Path: "/spec/nodeSelector",
 				Value: map[string]string{
@@ -168,8 +156,8 @@ func (ws *WebhookServer) mutate(ar *admissionv1.AdmissionReview) *admissionv1.Ad
 			// If nodeSelector already exists, we add/replace the specific key.
 			// JSON Patch requires escaping '/' with '~1' for keys in a path.
 			escapedKey := strings.ReplaceAll(instanceTypeLabel, "/", "~1")
-			patches = append(patches, JSONPatch{
-				Op:    "add", // "add" on an existing map key works like "replace"
+			patches = append(patches, types.JSONPatch{
+				Op:    "add",
 				Path:  fmt.Sprintf("/spec/nodeSelector/%s", escapedKey),
 				Value: finalInstance,
 			})
@@ -186,28 +174,114 @@ func (ws *WebhookServer) mutate(ar *admissionv1.AdmissionReview) *admissionv1.Ad
 		return deny(ar, "downloaded artifact has an unknown or unsupported compatibility spec format")
 	}
 
-	// For the compatibility spec, we patch the container image (this is the selection)
-	// For the model spec, the model provides a matching arch image.
+	patches, err = ws.replaceContainers(patches, pod.Annotations, pod.Spec.Containers, finalImage)
+	if err != nil {
+		return deny(ar, fmt.Sprintf("%s", err))
+	}
+
+	patchBytes, err := json.Marshal(patches)
+	if err != nil {
+		return deny(ar, fmt.Sprintf("failed to marshal patch: %v", err))
+	}
+
+	patchType := admissionv1.PatchTypeJSONPatch
+	return &admissionv1.AdmissionResponse{
+		Allowed:   true,
+		UID:       ar.Request.UID,
+		Patch:     patchBytes,
+		PatchType: &patchType,
+	}
+}
+
+// replaceContainers updates containers via add patches
+func (ws *WebhookServer) replaceContainers(
+	patches []types.JSONPatch,
+	annotations map[string]string,
+	containers []corev1.Container,
+	finalImage string,
+) ([]types.JSONPatch, error) {
+
+	targetRef, ok := annotations[targetImage]
+	if !ok {
+		targetRef = targetRefDefault
+	}
+
+	// Replace any placeholder images with the final. We need at least one.
+	// Unlike the pod replacement, don't break - could be another container
 	containerFound := false
-	for i, c := range pod.Spec.Containers {
+	for i, c := range containers {
 		if c.Image == targetRef {
-			patches = append(patches, JSONPatch{
+			patches = append(patches, types.JSONPatch{
 				Op:    "replace",
 				Path:  fmt.Sprintf("/spec/containers/%d/image", i),
 				Value: finalImage,
 			})
 			containerFound = true
-			break
 		}
 	}
 	if !containerFound {
-		return deny(ar, fmt.Sprintf("container %s not found", targetRef))
+		return patches, fmt.Errorf("container %s not found", targetRef)
 	}
+	return patches, nil
+}
 
+// mutateMiniCluster still selects instance type and pods, but also exposes customization of the entire setup
+func (ws *WebhookServer) mutateMiniCluster(ar *admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
+	mc := &miniclusterv1alpha2.MiniCluster{}
+	var rawObject map[string]interface{}
+	err := json.Unmarshal(ar.Request.Object.Raw, mc)
 	if err != nil {
-		return deny(ar, fmt.Sprintf("failed to find compatible image: %v", err))
+		return deny(ar, fmt.Sprintf("could not decode MiniCluster object: %v", err))
 	}
 
+	// Let's use the raw object for checking additional fields
+	err = json.Unmarshal(ar.Request.Object.Raw, &rawObject)
+	if err != nil {
+		return deny(ar, fmt.Sprintf("could not decode MiniCluster into raw object: %v", err))
+	}
+
+	// We use the MiniCluster's own labels and annotations
+	if val, ok := mc.Labels[enabledLabel]; !ok || val != "true" {
+		return admit(ar)
+	}
+	log.Printf("Mutating MiniCluster %s/%s", mc.Namespace, mc.Name)
+	imageRef, ok := mc.Annotations[imageRefAnnotation]
+	if !ok {
+		return deny(ar, fmt.Sprintf("missing required annotation on MiniCluster: %s", imageRefAnnotation))
+	}
+
+	ctx := context.Background()
+	genericSpec, err := artifact.DownloadCompatibilityArtifact(ctx, imageRef)
+	if err != nil {
+		return deny(ar, fmt.Sprintf("compatibility spec %s issue: %v", imageRef, err))
+	}
+
+	// For now, I'm assuming MiniClusters will primarily use Model specs.
+	// You could expand this to use feature-based selection as well.
+	spec, ok := genericSpec.(*types.ModelCompatibilitySpec)
+	if !ok {
+		return deny(ar, "received artifact for MiniCluster that was not a ModelCompatibilitySpec")
+	}
+
+	// For a MiniCluster, we assume we should evaluate against ALL nodes in the cluster
+	// as the scheduler will decide where to place the pods later.
+	// We pass nil for the nodeSelector to indicate this.
+	finalImage, prediction, err := ws.selectImageWithModel(ctx, mc.Annotations, spec)
+	if err != nil {
+		return deny(ar, fmt.Sprintf("Issue with Model Compatibility Spec: %s", err))
+	}
+
+	// Replace all referenced containers based on target name
+	containers := []corev1.Container{}
+	for _, container := range mc.Spec.Containers {
+		containers = append(containers, corev1.Container{Image: container.Image})
+	}
+
+	patches := flux.GetPatches(rawObject, prediction)
+	patches, err = ws.replaceContainers(patches, mc.Annotations, containers, finalImage)
+	if err != nil {
+		return deny(ar, fmt.Sprintf("%s", err))
+	}
 	patchBytes, err := json.Marshal(patches)
 	if err != nil {
 		return deny(ar, fmt.Sprintf("failed to marshal patch: %v", err))
@@ -245,18 +319,19 @@ func (ws *WebhookServer) selectImageWithFeatures(pod *corev1.Pod, spec *types.Co
 
 // selectImageWithModel uses the model compatibility spec to ping the sidecar server, get the best instance,
 // and then look up the correct container image for the instance's architecture.
+// We can accept annotations from a pod or MiniCluster (or other future abstraction)
 func (ws *WebhookServer) selectImageWithModel(
 	ctx context.Context,
-	pod *corev1.Pod,
+	annotations map[string]string,
 	spec *types.ModelCompatibilitySpec,
-) (string, *PredictionResponse, error) {
-	modelHint, ok := pod.Annotations[modelSelectionAnnotation]
+) (string, *types.PredictionResponse, error) {
+
+	modelHint, ok := annotations[modelSelectionAnnotation]
 	if !ok {
-		return "", nil, fmt.Errorf("model-based spec was provided, but pod is missing annotation: %s", modelSelectionAnnotation)
+		return "", nil, fmt.Errorf("model-based spec was provided, but object is missing annotation: %s", modelSelectionAnnotation)
 	}
 
 	var selectedRule *types.ModelSpec
-	fmt.Println(spec.Compatibilities)
 	for _, comp := range spec.Compatibilities {
 		if comp.Tag == modelHint && len(comp.Rules) > 0 {
 			selectedRule = &comp.Rules[0].MatchModel.Model
@@ -273,37 +348,35 @@ func (ws *WebhookServer) selectImageWithModel(
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to get combined node features: %w", err)
 	}
+
 	if len(nodeFeatures) == 0 {
-		return "", nil, fmt.Errorf("no schedulable nodes found in the cluster or static cache to evaluate")
+		return "", nil, fmt.Errorf("no nodes found to evaluate for model selection")
 	}
 
-	// Make a request to the ML server to get the max/min for the given metric
-	requestPayload := PredictionRequest{
+	requestPayload := types.PredictionRequest{
 		MetricName:     selectedRule.Name,
 		Directionality: selectedRule.Direction,
 		Features:       nodeFeatures,
 	}
+
 	log.Printf("Sending prediction request for model '%s' with %d nodes", requestPayload.MetricName, len(requestPayload.Features))
 	prediction, err := callPredictEndpoint(ctx, requestPayload)
-	fmt.Println(prediction)
 	if err != nil {
 		return "", nil, fmt.Errorf("model prediction failed: %w", err)
 	}
-	log.Printf("Model server selected instance with features: %+v", prediction.Instance)
+	log.Printf("Model server selected instance with features: %+v", prediction.SelectedInstance)
 
-	// Get the final container image URI for a matching arch.
 	finalImage, ok := selectedRule.Platforms[prediction.Arch]
 	if !ok {
 		return "", nil, fmt.Errorf("model spec's 'platforms' map does not have an entry for the chosen architecture '%s'", prediction.Arch)
 	}
-
-	log.Printf("Model selected %s '%s' and arch '%s', resulting in final image: '%s'", prediction.InstanceSelector, prediction.Instance, prediction.Arch, finalImage)
+	log.Printf("Model selected instance '%s' and arch '%s', resulting in final image: '%s'", prediction.Instance, prediction.Arch, finalImage)
 
 	// Return the instance name for the nodeSelector patch and the final image for the container patch.
 	return finalImage, prediction, nil
 }
 
-func callPredictEndpoint(ctx context.Context, payload PredictionRequest) (*PredictionResponse, error) {
+func callPredictEndpoint(ctx context.Context, payload types.PredictionRequest) (*types.PredictionResponse, error) {
 	requestBody, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal prediction request: %w", err)
@@ -323,7 +396,7 @@ func callPredictEndpoint(ctx context.Context, payload PredictionRequest) (*Predi
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("model server returned non-200 status: %s, body: %s", resp.Status, string(bodyBytes))
 	}
-	var prediction PredictionResponse
+	var prediction types.PredictionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&prediction); err != nil {
 		return nil, fmt.Errorf("failed to decode prediction response: %w", err)
 	}
@@ -405,7 +478,6 @@ func (ws *WebhookServer) getCombinedNodeFeatures(ctx context.Context, staticFeat
 			continue
 		}
 		var featureList []map[string]interface{}
-		fmt.Println(content)
 		if err := json.Unmarshal(content, &featureList); err != nil {
 			log.Printf("Warning: Failed to parse static feature file %s as a list of features: %v", filePath, err)
 			continue
