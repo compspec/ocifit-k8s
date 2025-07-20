@@ -67,12 +67,12 @@ type PredictionRequest struct {
 // PredictionResponse is the expected response from the Python model server.
 type PredictionResponse struct {
 	SelectedInstance map[string]interface{} `json:"selected_instance"`
-	Instance	 string                 `json:"instance"`
+	Instance         string                 `json:"instance"`
 	Arch             string                 `json:"arch"`
 	Score            float64                `json:"score"`
 	InstanceIndex    int                    `json:"instance_index"`
+	InstanceSelector string                 `json:"instance-selector"`
 }
-
 
 // WebhookServer with Node Cache and a direct k8s client
 type WebhookServer struct {
@@ -141,20 +141,18 @@ func (ws *WebhookServer) mutate(ar *admissionv1.AdmissionReview) *admissionv1.Ad
 	}
 
 	var finalImage, finalInstance string
-
+	var prediction *PredictionResponse
 	var patches []JSONPatch
 
 	switch spec := genericSpec.(type) {
 	case *types.ModelCompatibilitySpec:
 		log.Println("Handling artifact as ModelCompatibilitySpec")
-		finalInstance, finalImage, err = ws.selectImageWithModel(ctx, pod, spec)
+		finalImage, prediction, err = ws.selectImageWithModel(ctx, pod, spec)
 
 		// For the model spec, we make a request to the server here
 		if err != nil {
 			return deny(ar, fmt.Sprintf("Issue with Model Compatibility Spec: %s", err))
 		}
-
-		log.Printf("Model selected instance type '%s'. Patching NodeSelector.", finalInstance)
 
 		// If the pod's nodeSelector is nil, we need to create it with an "add" operation.
 		if pod.Spec.NodeSelector == nil {
@@ -162,7 +160,7 @@ func (ws *WebhookServer) mutate(ar *admissionv1.AdmissionReview) *admissionv1.Ad
 				Op:   "add",
 				Path: "/spec/nodeSelector",
 				Value: map[string]string{
-					instanceTypeLabel: finalInstance,
+					prediction.InstanceSelector: prediction.Instance,
 				},
 			})
 
@@ -245,16 +243,16 @@ func (ws *WebhookServer) selectImageWithFeatures(pod *corev1.Pod, spec *types.Co
 	return validator.EvaluateCompatibilitySpec(spec, nodeLabels)
 }
 
-// selectImageWithModel uses the model compatibility spec to ping the sidecar server and get the best instance type
-// selectImageWithModel uses the model compatibility spec to ping the sidecar server and get the best instance type
+// selectImageWithModel uses the model compatibility spec to ping the sidecar server, get the best instance,
+// and then look up the correct container image for the instance's architecture.
 func (ws *WebhookServer) selectImageWithModel(
 	ctx context.Context,
 	pod *corev1.Pod,
 	spec *types.ModelCompatibilitySpec,
-) (string, string, error) {
+) (string, *PredictionResponse, error) {
 	modelHint, ok := pod.Annotations[modelSelectionAnnotation]
 	if !ok {
-		return "", "", fmt.Errorf("model-based spec was provided, but pod is missing annotation: %s", modelSelectionAnnotation)
+		return "", nil, fmt.Errorf("model-based spec was provided, but pod is missing annotation: %s", modelSelectionAnnotation)
 	}
 
 	var selectedRule *types.ModelSpec
@@ -266,15 +264,17 @@ func (ws *WebhookServer) selectImageWithModel(
 		}
 	}
 	if selectedRule == nil {
-		return "", "", fmt.Errorf("no model-based compatibility rule found for tag '%s'", modelHint)
+		return "", nil, fmt.Errorf("no model-based compatibility rule found for tag '%s'", modelHint)
 	}
 
-	nodeFeatures, err := ws.getAllNodeFeatures(ctx)
+	// The environment variable name here was different from your previous request,
+	// using the name from this full script: "FEATURES_CACHE_DIR"
+	nodeFeatures, err := ws.getCombinedNodeFeatures(ctx, os.Getenv("FEATURES_CACHE_DIR"))
 	if err != nil {
-		return "", "", fmt.Errorf("failed to get node features: %w", err)
+		return "", nil, fmt.Errorf("failed to get combined node features: %w", err)
 	}
 	if len(nodeFeatures) == 0 {
-		return "", "", fmt.Errorf("no schedulable nodes found in the cluster to evaluate")
+		return "", nil, fmt.Errorf("no schedulable nodes found in the cluster or static cache to evaluate")
 	}
 
 	// Make a request to the ML server to get the max/min for the given metric
@@ -287,18 +287,20 @@ func (ws *WebhookServer) selectImageWithModel(
 	prediction, err := callPredictEndpoint(ctx, requestPayload)
 	fmt.Println(prediction)
 	if err != nil {
-		return "", "", fmt.Errorf("model prediction failed: %w", err)
+		return "", nil, fmt.Errorf("model prediction failed: %w", err)
 	}
-	log.Printf("Model server selected instance with features: %+v", prediction.SelectedInstance)
+	log.Printf("Model server selected instance with features: %+v", prediction.Instance)
 
-	// Get the right platform
+	// Get the final container image URI for a matching arch.
 	finalImage, ok := selectedRule.Platforms[prediction.Arch]
 	if !ok {
-		return "", "", fmt.Errorf("model does not provision architecture '%s'", prediction.Arch)
+		return "", nil, fmt.Errorf("model spec's 'platforms' map does not have an entry for the chosen architecture '%s'", prediction.Arch)
 	}
 
-	log.Printf("Model selected instance type: '%s'", prediction.Instance)
-	return prediction.Instance, finalImage, nil
+	log.Printf("Model selected %s '%s' and arch '%s', resulting in final image: '%s'", prediction.InstanceSelector, prediction.Instance, prediction.Arch, finalImage)
+
+	// Return the instance name for the nodeSelector patch and the final image for the container patch.
+	return finalImage, prediction, nil
 }
 
 func callPredictEndpoint(ctx context.Context, payload PredictionRequest) (*PredictionResponse, error) {
@@ -342,6 +344,87 @@ func (ws *WebhookServer) getAllNodeFeatures(ctx context.Context) ([]map[string]i
 		featureMatrix = append(featureMatrix, features)
 	}
 	return featureMatrix, nil
+}
+
+// getCombinedNodeFeatures merges dynamically discovered nodes with a static catalog from a directory.
+// It correctly handles static files that contain a JSON array (list) of node feature objects.
+func (ws *WebhookServer) getCombinedNodeFeatures(ctx context.Context, staticFeaturesDir string) ([]map[string]interface{}, error) {
+	// Get all currently running schedulable nodes.
+	dynamicallyDiscoveredFeatures, err := ws.getAllNodeFeatures(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not get dynamic node features: %w", err)
+	}
+
+	// Cut out early if no cache to load
+	if staticFeaturesDir == "" {
+		log.Println("STATIC_FEATURES_DIR not set, skipping static feature loading.")
+		return dynamicallyDiscoveredFeatures, nil
+	}
+
+	// Determine which label to use as the unique node identifier (kind doesn't have instance type)
+	identityLabelKey := os.Getenv("NODE_IDENTITY_LABEL")
+	if identityLabelKey == "" {
+		identityLabelKey = instanceTypeLabel // Fallback to the default
+	}
+	log.Printf("Using '%s' as the node identity label for de-duplication.", identityLabelKey)
+
+	// Create the final list, starting with the dynamic nodes.
+	combinedFeatures := make([]map[string]interface{}, 0)
+	combinedFeatures = append(combinedFeatures, dynamicallyDiscoveredFeatures...)
+
+	// Create a lookup map to track instance types we've already seen.
+	// This now correctly uses the configurable identityLabelKey.
+	seenInstanceTypes := make(map[string]bool)
+	for _, features := range dynamicallyDiscoveredFeatures {
+		if identityValue, ok := features[identityLabelKey].(string); ok {
+			seenInstanceTypes[identityValue] = true
+		}
+	}
+	if len(seenInstanceTypes) > 0 {
+		log.Printf("Found %d dynamically discovered nodes. Instance identities seen: %v", len(dynamicallyDiscoveredFeatures), seenInstanceTypes)
+	} else {
+		log.Printf("Found %d dynamically discovered nodes.", len(dynamicallyDiscoveredFeatures))
+	}
+
+	files, err := os.ReadDir(staticFeaturesDir)
+	if err != nil {
+		log.Printf("Warning: Could not read static features directory '%s': %v. Proceeding with dynamic nodes only.", staticFeaturesDir, err)
+		return combinedFeatures, nil
+	}
+
+	// Loop through the static files, parse them, and add them if they are new.
+	for _, file := range files {
+		if file.IsDir() || !strings.HasSuffix(file.Name(), ".json") {
+			continue
+		}
+
+		filePath := fmt.Sprintf("%s/%s", staticFeaturesDir, file.Name())
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			log.Printf("Warning: Failed to read static feature file %s: %v", filePath, err)
+			continue
+		}
+		var featureList []map[string]interface{}
+		fmt.Println(content)
+		if err := json.Unmarshal(content, &featureList); err != nil {
+			log.Printf("Warning: Failed to parse static feature file %s as a list of features: %v", filePath, err)
+			continue
+		}
+
+		for _, staticFeatures := range featureList {
+
+			// De-duplication check...
+			if identityValue, ok := staticFeatures[identityLabelKey].(string); ok {
+				if !seenInstanceTypes[identityValue] {
+					log.Printf("Adding new instance identity '%s' from static catalog file '%s'.", identityValue, file.Name())
+					combinedFeatures = append(combinedFeatures, staticFeatures)
+					seenInstanceTypes[identityValue] = true // Add to map to prevent duplicates
+				}
+			}
+		}
+	}
+
+	return combinedFeatures, nil
 }
 
 // getCompatibility labels returns all labels. We used to return just NFD but cannot
