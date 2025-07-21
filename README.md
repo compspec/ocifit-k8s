@@ -1,22 +1,31 @@
-
 # OCIFit
 
 <p align="center">
   <img src="docs/ocifit-k8s.png" height="500" alt="OCIFit Kubernetes">
 </p>
 
+This is a Kubernetes controller that can:
 
+- Select a container for a pod based on a compatibility artifact.
+- Select an instance type for a pod based on a machine learning model.
 
-This is a Kubernetes controller that will do the following:
+For the latter, we serve a sidecar to the controller that provides models. The node features are served to the model with a request to use a specific one to determine the optimal instance type.
+
+## Details
+
+We do the following:
 
 * Start running in a cluster with NFD, and retrieving metadata about nodes in the cluster, along with being updated when nodes are added and removed.
 * Receiving pods and checking if they are flagged for image selection.  
   * Being flagged means having the label "oci.image.compatibilities.selection/enabled" and (optionally) a node selector
-  * If the cluster is not homogenous, a node selector is required, and should be the instance type that the pod is intended for.
+  * If the cluster is not homogeneous, a node selector is required, and should be the instance type that the pod is intended for.
+
+When a pod (or abstraction that creates them) is created:
+
   * If enabled, a URI is provided that points to a compatibility artifact
   * The artifact describes several images (and criteria for checking) that can be used for the Pod
   * The controller checks known nodes for the instance type against the spec, 
-
+  * If an ML server model is specified in the artifact, the entire set of node metadata is sent to it.
 
 ## Notes
 
@@ -41,6 +50,7 @@ but needs further discussion and thinking.
 | oci.image.compatibilities.selection/target-image | annotation | placeholder:latest | yes | image URI to replace in pod |
 | oci.image.compatibilities.selection/image-ref| annotation | placeholder:latest | no | artifact reference "image" in OCI registry |
 | oci.image.compatibilities.selection/enabled | label | unset | yes | Flag to indicate we want to do compatibility image selection |
+| oci.image.compatibilities.selection/model | annotation | unset | no | If retrieving a model specification, choose this model. |
 
 Note that if you remove enabled, the webhook won't trigger, so it is required.
 
@@ -62,12 +72,21 @@ make push
 kind load docker-image ghcr.io/compspec/ocifit-k8s:latest
 ```
 
+You'll need the certificate manager.
+
+```bash
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml
+```
+
 And install the deployment manifest (assuming you are sitting in the cloned repository)
 
 ```bash
 kubectl apply -f deploy/webhook.yaml
 
-# The same
+# or with the ml server
+kubectl apply -f deploy/webhook-with-mlserver.yaml
+
+# The same (just the webhook)
 make install
 ```
 
@@ -94,11 +113,11 @@ And install NFD. This will add node feature discovery labels to each node.
 kubectl apply -k https://github.com/kubernetes-sigs/node-feature-discovery/deployment/overlays/default?ref=v0.17.3
 ```
 
-### 2. Add Custom Labels
+### 2. Custom Labels (Optional)
 
 Since we want to test that NFD is working, we are going to add custom labels. We just want to test and don't need the labels to persist with recreations, so we can just use `kubectl label`. However,
 if we do it the right (persistent) way we would write a configuration file to `/etc/kubernetes/node-feature-discovery/features.d` on the node.
-In our real world use case we would select based on operating system and kernel version. For our test case, we will just use a script that will programaticallly update worker nodes. In this example,
+In our real world use case we would select based on operating system and kernel version. For our test case, we will just use a script that will programatically update worker nodes. In this example,
 we are just going to add the same label to all nodes and then check our controller based on the image selected. Let's first add "vanilla":
 
 ```bash
@@ -144,6 +163,10 @@ kubectl logs ocifit-k8s-deployment-68d5bf5865-494mg -f
 
 ### 4. Test Compatibilility
 
+#### Custom Labels
+
+**Requires generation of custom labels above**
+
 At this point, we want to test compatibility. This step is already done, but I'll show you how I designed the compatibility spec. The logic for this dummy case is the following:
 
 1. If our custom label "feature.node.ocifit-k8s.flavor" is vanilla, we want to choose a debian container.
@@ -155,6 +178,9 @@ here we are flipping the logic a bit. We don't know the image, and instead we ar
 
 ```bash
 oras push ghcr.io/compspec/ocifit-k8s-compatibility:kind-example ./example/compatibility-test.json:application/vnd.oci.image.compatibilities.v1+json
+
+# For the ml model spec
+oras push ghcr.io/compspec/ocifit-k8s-compatibility:ml-example ./example/ml-compatibility-artifact.json:application/vnd.oci.image.model-compatibilities.v1+json
 ```
 
 We aren't going to be using any referrers API or linking this to an image. The target images are in the artifact, and we get there directly from the associated manifest.
@@ -233,6 +259,10 @@ REDHAT_SUPPORT_PRODUCT_VERSION="9.3"
 ```
 
 Boum! Conceptually, we are selecting a different image depending on the rules in the compatibility spec. Our node features were dummy, but they could be real attributes related to kernel, networking, etc.
+
+#### ML Server Decision
+
+See [these experiments](https://github.com/converged-computing/aws-performance-study/tree/main/experiment/eks/cpu/models) for an example of using models.
 
 ## License
 

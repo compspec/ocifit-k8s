@@ -75,26 +75,44 @@ spec:
     spec:
       serviceAccountName: ocifit-k8s-sa
       containers:
-      - name: webhook
+      - name: ml-server
+        image: ghcr.io/converged-computing/aws-performance-study:model-server
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5000
+          name: mlserver-api        
+      - name: ocifit-webhook
         image: ghcr.io/compspec/ocifit-k8s:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8443
           name: webhook-tls
         env:
+        - name: MODEL_SERVER_URL
+          value: "http://localhost:5000"
         - name: TLS_CERT_PATH
           value: /etc/webhook/certs/tls.crt
         - name: TLS_KEY_PATH
           value: /etc/webhook/certs/tls.key
+        - name: FEATURES_CACHE_DIR
+          value: /etc/features-cache
+          # kind (testing) doesn't have the instance-type label
+        - name: NODE_IDENTITY_LABEL
+          value: kubernetes.io/hostname
         volumeMounts:
         - name: webhook-certs
           mountPath: /etc/webhook/certs
           readOnly: true
+        - name: static-features-cache
+          mountPath: /etc/features-cache
+          readOnly: true
       volumes:
-      # This volume now mounts the secret created by cert-manager.
       - name: webhook-certs
         secret:
           secretName: ocifit-k8s-tls # Matches the Certificate's secretName
+      - name: static-features-cache
+        configMap:
+          name: node-features
 ---
 apiVersion: v1
 kind: Service
@@ -129,9 +147,5 @@ webhooks:
     apiGroups: [""]
     apiVersions: ["v1"]
     resources: ["pods"]
-  - operations: [ "CREATE" ]
-    apiGroups: ["flux-framework.org"]
-    apiVersions: ["v1alpha2"]
-    resources: ["miniclusters"]
   sideEffects: None
   admissionReviewVersions: ["v1"]

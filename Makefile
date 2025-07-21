@@ -16,15 +16,32 @@ build:
 		$(BUILD_CONTEXT)
 	@echo "Docker image $(FULL_IMAGE_NAME) built successfully."
 
+# The mlserver
+mlserver:
+	make -C ./mlserver
+
+# Kind setup - we want to build both and push
+kind: mlserver mlserver-push build push
+
+
 # Push the docker image
 push:
 	@echo "Pushing image $(FULL_IMAGE_NAME)..."
 	docker push $(FULL_IMAGE_NAME)
 
+mlserver-push:
+	@echo "Pushing image ghcr.io/converged-computing/aws-performance-study:model-server..."
+	docker push ghcr.io/converged-computing/aws-performance-study:model-server
+
 # Install the webhook
 install:
 	@echo "Installing $(FULL_IMAGE_NAME)..."
 	kubectl apply -f ./deploy/webhook.yaml
+
+# Install the webhook
+uninstall-mlserver:
+	@echo "Installing $(FULL_IMAGE_NAME)..."
+	kubectl apply -f ./deploy/webhook-with-mlserver.yaml
 
 # Install the webhook
 uninstall:
@@ -37,5 +54,5 @@ clean:
 	docker rmi $(FULL_IMAGE_NAME) || true
 	@echo "Docker image $(FULL_IMAGE_NAME) removed (if it existed)."
 
-.PHONY: all build clean
+.PHONY: all build clean mlserver
 

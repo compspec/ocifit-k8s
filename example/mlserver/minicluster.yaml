@@ -1,0 +1,66 @@
+apiVersion: flux-framework.org/v1alpha2
+kind: MiniCluster
+metadata:
+  name: test
+spec:
+  size: 1
+  logging:
+    quiet: true
+  pod:
+    labels:
+      oci.image.compatibilities.selection/enabled: "true"
+    annotations:
+      oci.image.compatibilities.selection/model: "fom"
+      oci.image.compatibilities.selection/image-ref: "ghcr.io/compspec/ocifit-k8s-compatibility:ml-example"
+  flux:
+    container:
+      disable: false      
+  containers:
+  - image: placeholder:latest
+    name: app
+    command: /bin/bash /tmp/run_${app}.sh
+    volumes:
+      # Ensure /dev/shm does not limit efa
+      shared-memory:
+        emptyDir: true
+        emptyDirMedium: "memory"
+    launcher: true
+    runFlux: true
+    securityContext:
+      privileged: false
+      addCapabilities: []
+    resources:
+      limits:
+        nvidia.com/gpu: "0"
+        vpc.amazonaws.com/efa: "0"
+    commands:      
+      init: |
+           rm -r /opt/hpcg/hpcg.dat
+           echo "" >> /opt/hpcg/hpcg.dat
+           echo "" >> /opt/hpcg/hpcg.dat
+           echo "32 32 32" >> /opt/hpcg/hpcg.dat
+           echo "15" >> /opt/hpcg/hpcg.dat
+           cat /opt/hpcg/hpcg.dat
+      pre: |
+         echo "ulimit -l unlimited" >> /root/.bashrc         
+         cat <<EOF >> /tmp/run_${app}.sh
+         #!/bin/bash
+         set -euo pipefail
+         flux resource list
+         for i in {1..1}
+         do
+           echo "FLUX-RUN START $app-iter-\$i"
+           flux run --setattr=user.study_id=$app-iter-\$i -N1 -n 2 -o cpu-affinity=per-task -o gpu-affinity=off     ${apprun}           
+           echo "FLUX-RUN END $app-iter-\$i"
+         done         
+           echo "FLUX-RESULTS START"
+           cat hpcg*.txt
+           echo "HPCG-BENCHMARKS"
+           cat HPCG-Benchmark*.txt
+           echo "FLUX-RESULTS END"
+         EOF
+         cat /tmp/run_${app}.sh
+
+    environment:	
+      apprun: '/opt/hpcg/xhpcg'
+      app: "hpcg"
